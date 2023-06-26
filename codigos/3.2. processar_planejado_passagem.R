@@ -2,7 +2,7 @@
 
 mao_dupla <- F
 
-nome_corredor <- 'CampoGrande_NorteSul'
+nome_corredor <- 'EstrCampinho_AvBrasil'
 
 testInstall <- function(x) {
   for (i in x) {

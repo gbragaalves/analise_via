@@ -2,7 +2,9 @@
 
 mao_dupla <- F
 
-nome_corredor <- "Downtown_Uptown"
+nome_corredor <- "EstrCampinho_AvBrasil"
+
+usar_frescao <- TRUE
 
 ################################################################################
 ################################################################################
@@ -52,6 +54,12 @@ pontos_usar <- if (!exists("pontos_usar")) {
     filter(!is.na(stop_id))
 }
 
+resumo_corredor <- fread(paste0("./corredores/", nome_corredor, "/resumo.csv"))
+
+resumo_corredor <- resumo_corredor %>% 
+  mutate(usar_frescao = usar_frescao)
+
+fwrite(resumo_corredor,paste0("./corredores/", nome_corredor, "/resumo.csv"))
 
 local_viagens <- paste0(local_dados, "/viagens/")
 ifelse(!dir.exists(file.path(getwd(), local_viagens)),
@@ -70,10 +78,15 @@ gtfs$shapes <- as.data.table(gtfs$shapes) %>%
   group_by(shape_id) %>% 
   arrange(shape_id,shape_pt_sequence)
 
+dicionario_lecd <- fread('../../dados/insumos/correspondencia_servico_lecd.csv')
+
 shapes <- convert_shapes_to_sf(gtfs) %>%
   left_join(distinct(gtfs$trips, shape_id, .keep_all = TRUE) %>% 
               select(trip_short_name, direction_id, shape_id),
-            by = "shape_id")
+            by = "shape_id") %>% 
+  left_join(dicionario_lecd, by = c('trip_short_name' = 'LECD')) %>% 
+  mutate(trip_short_name = if_else(!is.na(servico),servico,trip_short_name)) %>% 
+  select(-c(servico))
 
 gtfs_inter$shapes <- as.data.table(gtfs_inter$shapes) %>% 
   group_by(shape_id) %>% 
@@ -121,7 +134,13 @@ linhas_inter <- st_intersection(ponto_via_prox, shapes_inter) %>%
   distinct(trip_short_name, direction_id)
 
 linhas_lista <- linhas %>%
-  pull(trip_short_name) %>%
+  pull(trip_short_name)
+
+lecds_usar <- dicionario_lecd %>% 
+  filter(servico %in% linhas_lista) %>% 
+  pull(LECD)
+
+linhas_lista <- c(linhas_lista,lecds_usar) %>% 
   paste(collapse = "','")
 
 linhas_sentido <- linhas %>%
@@ -138,27 +157,46 @@ end_viagens <- paste0(
 )
 
 if (file.exists(end_viagens)) {
-  viagens <- fread(end_viagens)
+  viagens <- fread(end_viagens) %>% 
+    mutate(servico_realizado = as.character(servico_realizado))
 } else {
   query_viagens <- glue::glue("SELECT *
                                FROM `rj-smtr.projeto_subsidio_sppo.viagem_completa`
                                WHERE data IN ('{dias_paste}') AND servico_informado IN ('{linhas_lista}')")
 
   viagens <- try(basedosdados::read_sql(query_viagens)) %>%
+    left_join(dicionario_lecd, by = c('servico_realizado' = 'LECD')) %>% 
+    mutate(servico_realizado = if_else(!is.na(servico),servico,servico_realizado)) %>% 
+    select(-c(servico)) %>% 
     mutate(concat_linha_sentido = paste0(
-      servico_informado,
+      servico_realizado,
       "_",
       ifelse(sentido == "V", "1", "0")
     )) %>%
     filter(concat_linha_sentido %in% linhas_sentido$linhas_sentido) %>%
     select(data, id_veiculo, id_viagem, servico_realizado, shape_id, sentido, 
-           datetime_partida, datetime_chegada, concat_linha_sentido)
+           datetime_partida, datetime_chegada, concat_linha_sentido) %>% 
+    mutate(servico_realizado = as.character(servico_realizado))
 
   if (!inherits(viagens, "try-error")) {
     fwrite(viagens, end_viagens)
   } else {
     stop("Erro ao tentar baixar dados de viagens do BigQuery.")
   }
+}
+
+if(usar_frescao){
+  source("codigos/2.1. apuracao_viagens_frescao.R")
+  
+  viagens_frescao <- viagens_frescao %>% 
+    filter(concat_linha_sentido %in% linhas_sentido$linhas_sentido)
+  
+  # Realizar o bind_rows apenas com as colunas comuns 
+  viagens <- viagens %>% 
+    bind_rows(viagens_frescao)
+  
+  rm(gps_frescao,gtfs_frescao,viagens_freq_frescao,viagens_frescao,
+     frescoes_baixar,frescoes_usar,frescoes_usar_desagg)
 }
 
 ### Baixar GPS ----
@@ -186,7 +224,13 @@ if (!file.exists(end_gps_bruto)) {
                            AND servico IN ('{linhas_lista}')
                            AND ST_WITHIN(ST_GEOGPOINT(longitude, latitude), ST_GEOGFROMTEXT('{area_download}'))")
   
+  dicionario_lecd <- dicionario_lecd %>% 
+    rename(linha = servico)
+  
   gps <- try(basedosdados::read_sql(query_gps)) %>%
+    left_join(dicionario_lecd, by = c('servico' = 'LECD')) %>% 
+    mutate(servico = if_else(!is.na(linha),linha,servico)) %>% 
+    select(-c(linha)) %>%
     select(timestamp_gps, data, hora, id_veiculo, servico, 
            latitude, longitude, velocidade_instantanea)
   

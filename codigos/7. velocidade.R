@@ -1,6 +1,6 @@
 ### Lembre-se de ajustar o nome do corredor em todos os scripts.
 
-nome_corredor <- 'CampoGrande_NorteSul'
+nome_corredor <- 'EstrCampinho_AvBrasil'
 
 testInstall <- function(x) {
   for (i in x) {

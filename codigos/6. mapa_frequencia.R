@@ -1,6 +1,6 @@
 ### Lembre-se de ajustar o nome do corredor em todos os scripts.
 
-nome_corredor <- 'CampoGrande_NorteSul'
+nome_corredor <- 'EstrCampinho_AvBrasil'
 
 testInstall <- function(x) {
   for (i in x) {
@@ -97,3 +97,4 @@ ifelse(!dir.exists(file.path(getwd(), local_mapas)),
 end_img <- paste0(local_mapas,nome_corredor,'_frequencia.png')
 
 ggsave(end_img, dpi = 300,bg = "white")
+

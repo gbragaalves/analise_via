@@ -24,13 +24,13 @@ gtfs$shapes <- as.data.table(gtfs$shapes) %>%
 ### Define o nome do corredor a ser usado nos códigos.
 ### Não utilizar acentuação ou espaços.
 
-nome_corredor <- "Downtown_Uptown"
+nome_corredor <- "EstrCampinho_AvBrasil"
 
 ### Define o nome do corredor a ser usado em materiais de visualização, como
 ### mapas. Utilizar grafia compreensível para pessoas, com acentos, espaços e
 ### demais sinais gráficos.
 
-nome_humano <- "Barra da Tijuca: Av. das Américas e Av. Ayrton Senna"
+nome_humano <- "Estrada do Campinho: sentido Av. Brasil"
 
 pontos <- convert_stops_to_sf(gtfs) %>%
   distinct(stop_id, .keep_all = TRUE) %>%
@@ -40,9 +40,14 @@ pontos <- convert_stops_to_sf(gtfs) %>%
     by = c("stop_id")
   )
 
+dicionario_lecd <- fread('../../dados/insumos/correspondencia_servico_lecd.csv')
+
 trips_join <- gtfs$trips %>%
   select(shape_id, trip_id, trip_short_name, trip_headsign, direction_id) %>%
-  distinct(shape_id, .keep_all = T)
+  distinct(shape_id, .keep_all = T) %>% 
+  left_join(dicionario_lecd, by = c('trip_short_name' = 'LECD')) %>% 
+  mutate(trip_short_name = if_else(!is.na(servico),servico,trip_short_name)) %>% 
+  select(-c(servico))
 
 shapes <- convert_shapes_to_sf(gtfs) %>%
   left_join(trips_join)
@@ -55,7 +60,7 @@ View(shapes)
 ################################################################################
 ################################################################################
 
-linha_usar <- "900"
+linha_usar <- "833"
 sentido_usar <- "1"
 
 shape_usar <- shapes %>%
@@ -91,8 +96,8 @@ mapview(quebras_via) + shape_usar_m
 ################################################################################
 ################################################################################
 
-inicio_corredor <- 1
-fim_corredor <- 191
+inicio_corredor <- 50
+fim_corredor <- 189
 
 inicio_corredor <- quebras_via %>%
   filter(ponto == inicio_corredor)
@@ -255,6 +260,34 @@ pontos_usar <- cbind(pontos_usar, nearest_points) %>%
 
 mapview(via) + (pontos_usar)
 
+linhas_corredor <- gtfs$stop_times %>% 
+  filter(stop_id %in% pontos_usar$stop_id) %>% 
+  select(trip_id) %>% 
+  left_join(select(gtfs$trips,trip_id,trip_short_name)) %>% 
+  left_join(dicionario_lecd, by = c('trip_short_name' = 'LECD')) %>% 
+  mutate(trip_short_name = if_else(!is.na(servico),servico,trip_short_name)) %>% 
+  select(-c(servico))
+
+frescoes_corredor <- gtfs$routes %>% 
+  filter(route_type == '200') %>% 
+  left_join(select(gtfs$trips,trip_id,route_id)) %>% 
+  filter(trip_id %in% linhas_corredor$trip_id) %>% 
+  left_join(dicionario_lecd, by = c('route_short_name' = 'LECD')) %>% 
+  mutate(route_short_name = if_else(!is.na(servico),servico,route_short_name)) %>% 
+  select(-c(servico)) %>% 
+  arrange(route_short_name) %>% 
+  pull(route_short_name) %>% 
+  unique()
+
+frescoes_corredor <- paste0(frescoes_corredor, collapse = ", ")
+  
+linhas_corredor <- linhas_corredor %>% 
+  arrange(trip_short_name) %>% 
+  pull(trip_short_name) %>% 
+  unique() 
+
+linhas_corredor <- paste0(linhas_corredor, collapse = ", ")
+
 local_dados <- paste0("corredores/", nome_corredor)
 ifelse(!dir.exists(file.path(getwd(), local_dados)),
   dir.create(file.path(getwd(), local_dados), recursive = TRUE), FALSE
@@ -270,7 +303,10 @@ resumo_corredor <- data.frame(
   nome_humano = nome_humano,
   linha_base = linha_usar,
   sentido_base = sentido_usar,
-  linhas_stop_times = linhas_pontos_usar
+  linhas_stop_times = linhas_pontos_usar,
+  linhas_corredor = linhas_corredor,
+  frescoes_corredor = frescoes_corredor
 )
 
 fwrite(resumo_corredor, paste0("./corredores/", nome_corredor, "/resumo.csv"))
+
